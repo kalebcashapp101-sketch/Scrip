@@ -3,8 +3,8 @@
 -- ║  Sources: Kali_Hub · Latest · QBSource · QBPerfectBeam       ║
 -- ║           Trajectory · KickerAimbot · KickExtender           ║
 -- ║           TackleAimbot · NoJumpCooldown · Anti-Lag            ║
--- ║  BUILD: v26c — probe-based VIM+FTI detection · zero spam      ║
--- ║         CFrame fallback when FTI unsupported · accel physics   ║
+-- ║  BUILD: v26d — firetouchinterest REMOVED · CFrame-only mags   ║
+-- ║         zero CrossExperience spam guaranteed                   ║
 -- ╚══════════════════════════════════════════════════════════════╝
 
 repeat task.wait() until game:IsLoaded()
@@ -34,17 +34,10 @@ if VIM then
     pcall(function() _dp:Destroy() end)
 end
 
--- Probe firetouchinterest the same way — one test call on a dummy part.
--- If it fails (CrossExperience / nil), FTI_ok stays false and every
--- firetouchinterest site falls back to direct CFrame instead.
-local FTI_ok = false
-do
-    local _a = Instance.new("Part"); _a.Parent = nil
-    local _b = Instance.new("Part"); _b.Parent = nil
-    FTI_ok = typeof(firetouchinterest) == "function"
-          and pcall(firetouchinterest, _a, _b, 0)
-    pcall(function() _a:Destroy(); _b:Destroy() end)
-end
+-- firetouchinterest is NOT used anywhere in this script.
+-- On mobile executors every engine-level FTI call logs a CrossExperience
+-- error that pcall cannot suppress. All touch-triggering is done via
+-- direct CFrame overlap instead, which works on every executor.
 local CoreGui           = game:GetService("CoreGui")
 local Workspace         = game:GetService("Workspace")
 local Camera            = Workspace.CurrentCamera
@@ -1162,7 +1155,7 @@ local hitboxes           = {}
 local catchresizeon      = false
 local catchresizerange   = 10
 local lmgg               = 0
-local magmode            = "FTI"
+local magmode            = "CFrame"
 local speedEnabled       = false
 local speedValue         = 0.1
 local movementLoop       = nil
@@ -1367,13 +1360,9 @@ RunService.Heartbeat:Connect(function(dt)
             else
                 local cp = catchPart(ball)
                 if cp then
-                    if magmode == "CFrame" or not FTI_ok then
-                        ball.CFrame = cp.CFrame
-                    else
-                        pcall(firetouchinterest, ball, cp, 0)
-                        task.wait()
-                        pcall(firetouchinterest, ball, cp, 1)
-                    end
+                    -- Always use CFrame — firetouchinterest causes engine-level
+                    -- CrossExperience spam on mobile executors regardless of pcall.
+                    ball.CFrame = cp.CFrame
                 end
                 if magsdelayon then lmgg = cnp end
             end
@@ -1604,12 +1593,9 @@ local function runTackleReach()
             if targetPart:IsA("BasePart") then
                 local myPart = character:FindFirstChild(targetPart.Name)
                 if myPart then
-                    if FTI_ok then
-                        pcall(firetouchinterest, myPart, targetPart, 0)
-                    else
-                        -- Fallback: directly overlap our part onto theirs
-                        pcall(function() myPart.CFrame = targetPart.CFrame end)
-                    end
+                    -- CFrame overlap triggers the tackle touch server-side.
+                    -- firetouchinterest removed — it spams CrossExperience on mobile.
+                    pcall(function() myPart.CFrame = targetPart.CFrame end)
                 end
             end
         end
@@ -2041,7 +2027,7 @@ end)
 AddSlider(tfCatch, "Mag Delay", 0, 1, 0, 1, function(v)
     magsdelay = v; magsdelayon = v > 0
 end)
-AddDropdown(tfCatch, "Mag Mode", {"FTI", "CFrame"}, 1, function(v)
+AddDropdown(tfCatch, "Mag Mode", {"CFrame"}, 1, function(v)
     magmode = v
 end)
 AddToggle(tfCatch, "Show Hitbox", false, function(v)
@@ -2278,4 +2264,4 @@ AddSlider(tfMisc, "Pull Radius", 1, 25, 5, 1, function(v) pullvectordistance = v
 -- ================================================================
 switchTab("Catching")
 
-print("Aethel Hub v26c | FIX: probe-based VIM+FTI detection silences CrossExperience spam permanently · CFrame fallback for unsupported executors")
+print("Aethel Hub v26d | firetouchinterest fully removed · CFrame-only mags+tackle · zero CrossExperience spam")
