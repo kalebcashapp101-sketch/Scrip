@@ -3,8 +3,8 @@
 -- ║  Sources: Kali_Hub · Latest · QBSource · QBPerfectBeam       ║
 -- ║           Trajectory · KickerAimbot · KickExtender           ║
 -- ║           TackleAimbot · NoJumpCooldown · Anti-Lag            ║
--- ║  BUILD: v26b — VIM nil-guard · pcall all VIM · mobile safe    ║
--- ║         accel prediction · 400-step solver · auto-throw        ║
+-- ║  BUILD: v26c — probe-based VIM+FTI detection · zero spam      ║
+-- ║         CFrame fallback when FTI unsupported · accel physics   ║
 -- ╚══════════════════════════════════════════════════════════════╝
 
 repeat task.wait() until game:IsLoaded()
@@ -19,11 +19,32 @@ local UserInputService  = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService      = game:GetService("TweenService")
 local TestService       = game:GetService("TestService")
-local VIM               = game:GetService("VirtualInputManager")
--- Safety: some mobile executors expose VIM but not all its methods.
--- Check once so every caller can branch cheaply.
-local VIM_hasTouch  = VIM and typeof(VIM.SendTouchEvent)       == "function"
-local VIM_hasMouse  = VIM and typeof(VIM.SendMouseButtonEvent) == "function"
+local VIM = pcall(function() return game:GetService("VirtualInputManager") end)
+    and game:GetService("VirtualInputManager") or nil
+
+-- Probe VIM methods with a REAL call — typeof() lies on some executors.
+-- A failing call generates one CrossExperience log entry but prevents
+-- the hundreds that would follow from the Heartbeat loops.
+local VIM_hasTouch = false
+local VIM_hasMouse = false
+if VIM then
+    local _dp = Instance.new("Part"); _dp.Parent = nil
+    VIM_hasTouch  = pcall(function() VIM:SendTouchEvent(0, Enum.UserInputState.Cancel.Value, 0, 0) end)
+    VIM_hasMouse  = pcall(function() VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0) end)
+    pcall(function() _dp:Destroy() end)
+end
+
+-- Probe firetouchinterest the same way — one test call on a dummy part.
+-- If it fails (CrossExperience / nil), FTI_ok stays false and every
+-- firetouchinterest site falls back to direct CFrame instead.
+local FTI_ok = false
+do
+    local _a = Instance.new("Part"); _a.Parent = nil
+    local _b = Instance.new("Part"); _b.Parent = nil
+    FTI_ok = typeof(firetouchinterest) == "function"
+          and pcall(firetouchinterest, _a, _b, 0)
+    pcall(function() _a:Destroy(); _b:Destroy() end)
+end
 local CoreGui           = game:GetService("CoreGui")
 local Workspace         = game:GetService("Workspace")
 local Camera            = Workspace.CurrentCamera
@@ -1346,16 +1367,12 @@ RunService.Heartbeat:Connect(function(dt)
             else
                 local cp = catchPart(ball)
                 if cp then
-                    if magmode == "CFrame" then
+                    if magmode == "CFrame" or not FTI_ok then
                         ball.CFrame = cp.CFrame
                     else
-                        if typeof(firetouchinterest) == "function" then
-                            pcall(firetouchinterest, ball, cp, 0)
-                            task.wait()
-                            pcall(firetouchinterest, ball, cp, 1)
-                        else
-                            ball.CFrame = cp.CFrame
-                        end
+                        pcall(firetouchinterest, ball, cp, 0)
+                        task.wait()
+                        pcall(firetouchinterest, ball, cp, 1)
                     end
                 end
                 if magsdelayon then lmgg = cnp end
@@ -1587,11 +1604,12 @@ local function runTackleReach()
             if targetPart:IsA("BasePart") then
                 local myPart = character:FindFirstChild(targetPart.Name)
                 if myPart then
-                    pcall(function()
-                        if typeof(firetouchinterest) == "function" then
-                            firetouchinterest(myPart, targetPart, 0)
-                        end
-                    end)
+                    if FTI_ok then
+                        pcall(firetouchinterest, myPart, targetPart, 0)
+                    else
+                        -- Fallback: directly overlap our part onto theirs
+                        pcall(function() myPart.CFrame = targetPart.CFrame end)
+                    end
                 end
             end
         end
@@ -2260,4 +2278,4 @@ AddSlider(tfMisc, "Pull Radius", 1, 25, 5, 1, function(v) pullvectordistance = v
 -- ================================================================
 switchTab("Catching")
 
-print("Aethel Hub v26b | FIX: VIM nil-guard (no more CrossExperience spam · nil crash) | v26 features: accel prediction · 400-step solver · open-WR check · auto-throw · power cal · confidence HUD")
+print("Aethel Hub v26c | FIX: probe-based VIM+FTI detection silences CrossExperience spam permanently · CFrame fallback for unsupported executors")
