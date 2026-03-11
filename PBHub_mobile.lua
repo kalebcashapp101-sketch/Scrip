@@ -1234,22 +1234,15 @@ end
 
 function startBarWatcher()
     stopBarWatcher()
-    local lp  = Plr.LocalPlayer
-    local Bar
-    pcall(function() Bar = lp.PlayerGui.Visual.Shooting.Bar end)
-    if not Bar then
-        task.delay(0.3, function() if AutoShootEnabled then startBarWatcher() end end)
-        return
-    end
-    barWatcher = Bar:GetPropertyChangedSignal("Size"):Connect(function()
-        if not AutoShootEnabled then return end
-        Bar.Size = UDim2.new(1,0,1,0)
-    end)
+    local lp = Plr.LocalPlayer
+    -- Re-fetch the bar every single heartbeat so a stale reference never causes a miss.
+    -- PB destroys and recreates the Bar between shots, so capturing it once is unreliable.
     barForceLoop = Run.Heartbeat:Connect(function()
         if not AutoShootEnabled then stopBarWatcher(); return end
         pcall(function()
-            if Bar.Size.Y.Scale > 0.01 and Bar.Size.Y.Scale < 1 then
-                Bar.Size = UDim2.new(1,0,1,0)
+            local bar = lp.PlayerGui.Visual.Shooting.Bar
+            if bar and bar.Size.Y.Scale > 0.01 and bar.Size.Y.Scale < 1 then
+                bar.Size = UDim2.new(1, 0, 1, 0)
             end
         end)
     end)
@@ -1312,51 +1305,65 @@ function setupAutoShoot()
     end)
 
     -- Mobile path
+    -- Strategy: watch the character's "Shooting" attribute.
+    -- The moment it flips true the shot charge begins.
+    -- We detect the shot type at that instant, wait the correct ms, then
+    -- force Bar.Size to full — identical to the desktop key-release timing.
     if isMobile then
         task.spawn(function()
             local lp = Plr.LocalPlayer
-            local ShootBtn
-            repeat
-                pcall(function() ShootBtn = lp.PlayerGui.Mobile.Holder.Shoot end)
-                if not ShootBtn then task.wait(0.5) end
-            until ShootBtn
-            SOStatus.Text      = "Ready - tap shoot button!"
+            SOStatus.Text       = "Ready - tap shoot button!"
             SOStatus.TextColor3 = Color3.fromRGB(180,180,180)
-            ShootBtn.Activated:Connect(function()
-                if not AutoShootEnabled then return end
-                SOStatus.Text      = "Greening..."; SOStatus.TextColor3 = Color3.fromRGB(80,255,120)
-                pcall(function() lp.PlayerGui.Visual.Shooting.Bar.Size = UDim2.new(1,0,1,0) end)
-                local key, _ = detectShot()
-                if finetuneActive then tuneBanner.Visible = true; task.spawn(function() checkShotFeedback(key) end) end
-                task.wait(0.5)
-                if AutoShootEnabled then SOStatus.Text = "Ready - tap shoot button!"; SOStatus.TextColor3 = Color3.fromRGB(180,180,180) end
-            end)
-            local char = lp.Character or lp.CharacterAdded:Wait()
-            local function watchShootAttr(c)
+
+            local function attachShootAttr(c)
                 c:GetAttributeChangedSignal("Shooting"):Connect(function()
                     if not AutoShootEnabled then return end
-                    if c:GetAttribute("Shooting") then
-                        pcall(function() lp.PlayerGui.Visual.Shooting.Bar.Size = UDim2.new(1,0,1,0) end)
+                    if not c:GetAttribute("Shooting") then return end
+                    -- Shot just started — snapshot the timing now
+                    shooting = true
+                    local key, _ = detectShot()
+                    local ms = shotTimings[key]
+                    if not key:find("moving") then
+                        ms = math.max(ms - math.floor(CurrentPing / 2), 80)
+                    end
+                    SOStatus.Text       = "Charging " .. ms .. "ms - " .. (shotLabels[key] or key)
+                    SOStatus.TextColor3 = Color3.fromRGB(255, 200, 80)
+
+                    task.wait(ms / 1000)
+
+                    if not AutoShootEnabled or not shooting then return end
+
+                    -- Force bar to full (green release)
+                    for _ = 1, 8 do
+                        pcall(function()
+                            lp.PlayerGui.Visual.Shooting.Bar.Size = UDim2.new(1, 0, 1, 0)
+                        end)
+                        task.wait()
+                    end
+
+                    SOStatus.Text       = "Released! (" .. ms .. "ms)"
+                    SOStatus.TextColor3 = Color3.fromRGB(80, 255, 120)
+                    if finetuneActive then
+                        tuneBanner.Visible = true
+                        task.spawn(function() checkShotFeedback(key) end)
+                    end
+                    task.wait(0.8)
+                    shooting = false
+                    if AutoShootEnabled then
+                        SOStatus.Text       = "Ready - tap shoot button!"
+                        SOStatus.TextColor3 = Color3.fromRGB(180, 180, 180)
                     end
                 end)
             end
-            pcall(function() watchShootAttr(char) end)
+
+            local char = lp.Character or lp.CharacterAdded:Wait()
+            pcall(function() attachShootAttr(char) end)
             lp.CharacterAdded:Connect(function(c)
-                task.wait(1); pcall(function() watchShootAttr(c) end)
-                ShootBtn = nil
-                repeat
-                    pcall(function() ShootBtn = lp.PlayerGui.Mobile.Holder.Shoot end)
-                    if not ShootBtn then task.wait(0.5) end
-                until ShootBtn
-                ShootBtn.Activated:Connect(function()
-                    if not AutoShootEnabled then return end
-                    SOStatus.Text      = "Greening..."; SOStatus.TextColor3 = Color3.fromRGB(80,255,120)
-                    pcall(function() lp.PlayerGui.Visual.Shooting.Bar.Size = UDim2.new(1,0,1,0) end)
-                    local key2, _ = detectShot()
-                    if finetuneActive then tuneBanner.Visible = true; task.spawn(function() checkShotFeedback(key2) end) end
-                    task.wait(0.5)
-                    if AutoShootEnabled then SOStatus.Text = "Ready - tap shoot button!"; SOStatus.TextColor3 = Color3.fromRGB(180,180,180) end
-                end)
+                task.wait(1)
+                shooting = false
+                pcall(function() attachShootAttr(c) end)
+                SOStatus.Text       = "Ready - tap shoot button!"
+                SOStatus.TextColor3 = Color3.fromRGB(180, 180, 180)
             end)
         end)
     end
